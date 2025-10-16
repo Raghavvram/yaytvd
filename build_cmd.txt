@@ -1,0 +1,19 @@
+pyinstaller --onefile `
+  --name YoutubeDownloader `
+  --hidden-import yt_dlp `
+  --hidden-import win32ctypes.pywin32 `
+  --hidden-import pywintypes `
+  --hidden-import win32api `
+  --hidden-import gradio `
+  --hidden-import gradio_client `
+  --hidden-import safehttpx `
+  --hidden-import groovy `
+  --collect-all gradio `
+  --collect-all gradio_client `
+  --collect-all safehttpx `
+  --collect-all win32ctypes `
+  --collect-all pywin32_ctypes `
+  --collect-all groovy `
+  --additional-hooks-dir=./hooks `
+  --runtime-hook=./runtime_hook.py `
+  app.py
