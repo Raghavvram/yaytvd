@@ -1,9 +1,13 @@
-import gradio as gr
-import yt_dlp
+"""
+This module provides a web-based UI for downloading YouTube videos using yt-dlp.
+"""
+
 import os
 import webbrowser
 from pathlib import Path
 from threading import Timer
+import gradio as gr
+import yt_dlp
 
 # --- Helper Functions ---
 
@@ -25,9 +29,37 @@ def extract_dir(file_paths):
 # --- Core Downloader Class ---
 
 class YouTubeDownloader:
+    """A class to handle downloading YouTube videos."""
     def __init__(self):
         self.video_info = None
         self.formats = []
+
+    def _parse_formats(self, info):
+        """Parse video formats and return a list of choices."""
+        self.formats = ["best"]
+        format_choices = ["Best Available (Auto)"]
+        for fmt in info.get("formats", []):
+            fmt_id = fmt.get("format_id")
+            ext = fmt.get("ext", "unknown")
+            res = fmt.get("resolution", "audio only")
+            vcodec = fmt.get("vcodec", "none")
+            acodec = fmt.get("acodec", "none")
+            fsize = fmt.get("filesize", 0)
+
+            if vcodec != "none" and acodec != "none":
+                ftype = "Video+Audio"
+            elif vcodec != "none":
+                ftype = "Video Only"
+            elif acodec != "none":
+                ftype = "Audio Only"
+            else:
+                continue
+
+            size_str = f"{fsize / 1024 / 1024:.1f} MB" if fsize else "Unknown size"
+            desc = f"{ftype} - {res} - {ext} - {size_str}"
+            format_choices.append(desc)
+            self.formats.append(fmt_id)
+        return format_choices
 
     def get_video_info(self, url):
         """Fetch video metadata and available formats."""
@@ -36,41 +68,20 @@ class YouTubeDownloader:
                 gr.update(choices=[], value=None, visible=False),
                 "",
                 "❌ Please enter a valid YouTube URL",
-                gr.update(visible=False)
+                gr.update(visible=False),
             )
         try:
             ydl_opts = {"quiet": True, "no_warnings": True, "extract_flat": False}
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                self.video_info = ydl.extract_info(url, download=False)
+                info = ydl.extract_info(url, download=False)
 
-            title    = self.video_info.get("title", "Unknown")
-            duration = self.video_info.get("duration", 0)
-            uploader = self.video_info.get("uploader", "Unknown")
+            title = info.get("title", "Unknown")
+            duration = info.get("duration", 0)
+            uploader = info.get("uploader", "Unknown")
             minutes, seconds = divmod(duration, 60)
             duration_str = f"{int(minutes)}:{int(seconds):02d}"
 
-            # Build format list
-            self.formats = ["best"]
-            format_choices = ["Best Available (Auto)"]
-            for fmt in self.video_info.get("formats", []):
-                fmt_id    = fmt.get("format_id")
-                ext       = fmt.get("ext", "unknown")
-                res       = fmt.get("resolution", "audio only")
-                vcodec    = fmt.get("vcodec", "none")
-                acodec    = fmt.get("acodec", "none")
-                fsize     = fmt.get("filesize", 0)
-                if vcodec != "none" and acodec != "none":
-                    ftype = "Video+Audio"
-                elif vcodec != "none":
-                    ftype = "Video Only"
-                elif acodec != "none":
-                    ftype = "Audio Only"
-                else:
-                    continue
-                size_str = f"{fsize/1024/1024:.1f} MB" if fsize else "Unknown size"
-                desc = f"{ftype} - {res} - {ext} - {size_str}"
-                format_choices.append(desc)
-                self.formats.append(fmt_id)
+            format_choices = self._parse_formats(info)
 
             info_md = (
                 "### 📹 Video Information\n\n"
@@ -83,21 +94,21 @@ class YouTubeDownloader:
                 gr.update(choices=format_choices, value=format_choices[0], visible=True),
                 info_md,
                 "✅ Video details fetched successfully!",
-                gr.update(visible=True)
+                gr.update(visible=True),
             )
-        except Exception as e:
+        except yt_dlp.utils.DownloadError as e:
             return (
                 gr.update(choices=[], value=None, visible=False),
                 "",
                 f"❌ Error: {str(e)}",
-                gr.update(visible=False)
+                gr.update(visible=False),
             )
 
-    def download_video(self, url, format_choice, save_location, auto_download):
+    def download_video(self, url, format_choice, save_dir, auto_download):
         """Download the video based on user selection."""
         if not url or not url.strip():
             return "❌ Please enter a valid YouTube URL"
-        if not save_location or not os.path.isdir(save_location):
+        if not save_dir or not os.path.isdir(save_dir):
             return "❌ Please select a valid save location"
         try:
             # Determine format code
@@ -109,14 +120,14 @@ class YouTubeDownloader:
 
             ydl_opts = {
                 "format": fmt_code,
-                "outtmpl": os.path.join(save_location, "%(title)s.%(ext)s"),
+                "outtmpl": os.path.join(save_dir, "%(title)s.%(ext)s"),
                 "progress_hooks": []
             }
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
                 filename = ydl.prepare_filename(info)
             return f"✅ Download completed successfully!\n📁 Saved to: {filename}"
-        except Exception as e:
+        except yt_dlp.utils.DownloadError as e:
             return f"❌ Download failed: {str(e)}"
 
 # --- Instantiate Downloader ---
@@ -125,7 +136,7 @@ downloader = YouTubeDownloader()
 
 # --- Gradio Interface ---
 
-dark_css = """
+DARK_CSS = """
 .container {
   max-width: 900px;
   margin: auto;
@@ -181,7 +192,7 @@ footer { display: none !important; }
 with gr.Blocks(
     title="YouTube Video Downloader",
     theme=gr.themes.Monochrome(),
-    css=dark_css
+    css=DARK_CSS
 ) as app:
 
     with gr.Column(elem_classes="container"):
@@ -215,7 +226,7 @@ with gr.Blocks(
                         elem_classes="status-box"
                     )
                 with gr.Column(scale=1):
-                    video_info = gr.Markdown(
+                    video_info_md = gr.Markdown(
                         "*No video loaded yet*",
                         elem_classes="info-section"
                     )
@@ -231,7 +242,7 @@ with gr.Blocks(
                                 interactive=True
                             )
                         with gr.Column(scale=2):
-                            save_location = gr.Textbox(
+                            save_location_input = gr.Textbox(
                                 label="💾 Save Location",
                                 value=str(Path.home() / "Music"),
                                 lines=1,
@@ -260,14 +271,15 @@ with gr.Blocks(
             )
 
     # Event bindings
+    # pylint: disable=no-member
     fetch_btn.click(
         fn=downloader.get_video_info,
         inputs=[url_input],
-        outputs=[format_dropdown, video_info, status_msg, download_section]
+        outputs=[format_dropdown, video_info_md, status_msg, download_section]
     )
     download_btn.click(
         fn=downloader.download_video,
-        inputs=[url_input, format_dropdown, save_location, auto_download_check],
+        inputs=[url_input, format_dropdown, save_location_input, auto_download_check],
         outputs=[status_msg]
     )
 
